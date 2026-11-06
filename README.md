@@ -57,8 +57,10 @@ longer Advanced panels. The lighting panels are split into two tabs:
 6. **FILL / CLEAR / STAGE grid / COMMIT** → paint swatches with the color picker,
    then stage LED runs (≤19 RGB pixels per 64-byte report) and commit.
 7. **Rainbow / Chase** → simple streaming demos.
-8. **Auto-keepalive** → sends `HELLO` with the keepalive flag every 750 ms so the
-   board doesn't fall back to onboard animations (2 s default timeout).
+8. **Auto-renew** → a claim is a *lease* that only a repeated `CLAIM` renews (per
+   HLP 2.0 — `HELLO`/`KEEPALIVE` does **not** extend it). Auto-renew re-sends `CLAIM 0`
+   with the same token/name/exclusive every ⅓ of the lease (default lease 2 s), reading
+   the generation back each time, so the board doesn't fall back to onboard animations.
 9. **Animation & brightness** → `SET_ANIMATION` (index, or Off = `0xFFFF`),
    `SET_ANIMATION_SPEED` (idle/pressed/case; blank = leave unchanged = `0xFF`),
    `SET_BRIGHTNESS` (step, or `0xFF` = saved step; optional Save), and
@@ -141,6 +143,67 @@ through Connect → Claim → Fill/Stage/Commit and watches the board, then uses
 **Copy**/**Save .txt** to attach the session log (with device fingerprint) to the
 PR discussion. The hex log makes it easy to pin down exactly which frame behaved
 differently between builds.
+
+## More tools
+
+- **Live state panel** (left column) — auto-subscribes on connect and updates on
+  every `STATE_CHANGED` event: input mode, profile, player, animation, brightness,
+  takeover #, holder, flags. Decoding page 1 also populates it.
+- **Pixel formats** — a Format selector (RGB / RGBW / RGB565) on the Lighting panel
+  drives FILL, STAGE, and the demos. RGBW sends `W = min(r,g,b)` so the white
+  channel lights up; RGB565 packs red 11–15, green 5–10, blue 0–4.
+- **Claim probes** (Claim panel) — *2nd claim (shared)* (new token under a shared
+  claim), *Takeover* (claim action 1), and *Stale-gen COMMIT* (deliberately wrong
+  generation → expect STALE/CLAIMED). Watch the reply status.
+- **Lease renewal + observer** — the claim is a lease renewed only by repeated
+  `CLAIM` (the tester re-sends `CLAIM 0` with the same token at ⅓ lease; `HELLO`/
+  keepalive does not renew it). A live "Ns since renewal (lease Ts)" readout tracks it,
+  and *Let lease lapse* stops renewal so you can watch the board fall back to onboard
+  animations at the lease timeout. `claim()` also verifies the reply's holder token is
+  ours (`held_by`) before treating the claim as held, and renewal detects takeover /
+  generation-step and flags the claim lost.
+- **UNSTAGE** (Targeted stage) — removes staged pixels for the chosen addressing /
+  address / count and commits, completing command coverage.
+- **Performance** (Advanced) — *Benchmark* measures request RTT (30× HELLO) and,
+  when claimed, sustained STAGE+COMMIT frames/sec at the current LED count & format
+  (the readout also notes reports-per-frame, which reflects run chunking across the
+  64-byte reports). *Benchmark all formats* sweeps RGB / RGBW / RGB565 back-to-back
+  and logs a side-by-side comparison plus the winner, then restores the selected
+  format. It doubles as a **per-format support probe**: it pauses the periodic lease
+  renewal and instead renews once between formats (so no renewal fires mid-burst to
+  race the dense STAGE stream, while the lease never lapses), stages one gate frame of
+  each format to read the COMMIT status, then times throughput — tolerating the odd
+  dropped COMMIT (counted as `(n dropped)`) rather than discarding a format that works.
+  Each format's outcome is recorded independently — `N fps` when accepted, or
+  `UNSUPPORTED` / `INVALID` / `STALE` / `CLAIMED` / `no reply (timeout)` when the gate
+  frame is rejected — continuing through all three and always printing the summary.
+  Fewer bytes per LED (RGB565 = 2) means fewer reports per frame and usually higher fps,
+  where the firmware implements the format.
+- **Quality of life** — auto-reconnects to a previously-granted device on load (no
+  chooser), and remembers claim name, color, pixel format, the active tab, and the
+  Explain toggle in `localStorage`.
+
+## Learning & decision aids
+
+For a team coming up to speed on the protocol and weighing a merge:
+
+- **Guided tour** (Advanced) — a "Learn mode" that walks the full lifecycle one command
+  at a time — HELLO → GET_PAGE → SUBSCRIBE → CLAIM → CONFIGURE → FILL+COMMIT → renew →
+  RELEASE — each with a one-line note on what it does and why, and a *Run this step*
+  button that fires the real command (results in the log). Step numbers tick to ✓ as you go.
+- **Explain log** — a toggle in the Log header that annotates every TX/RX line in plain
+  English: the command's purpose, decoded flags (`gen N · holder · keepalive · commit-after
+  · no-reply`), the status meaning (e.g. `CLAIMED — not the current holder`), and payload
+  for CLAIM/STAGE (action, token, addressing, pixel format). The annotations are included
+  in the Copy/Save export too.
+- **Claim/lease visualizer** (Claim panel) — a live `Unclaimed → Held → Lapsed/taken-over`
+  state strip that highlights the current phase and shows generation, holder, and a lease
+  countdown — making the lease concept (and a lapse) visible as it happens.
+- **Conformance report** (Advanced) — one button runs the full matrix (handshake, claim/
+  lease, all three pixel formats, the addressing modes, stale-generation rejection, UNSTAGE)
+  and emits a pass/fail/skip/info table as **Markdown** to paste straight into the PR. It
+  claims and releases on its own (reusing an existing claim if you hold one), and pauses
+  periodic renewal while it runs. *Copy Markdown* puts the report on the clipboard.
 
 ## Page decoder
 
