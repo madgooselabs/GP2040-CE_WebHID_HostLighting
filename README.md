@@ -69,8 +69,11 @@ longer Advanced panels. The lighting panels are split into two tabs:
 10. **Raw command** → craft any command/flags/payload by hand and see the reply.
 11. **Demo scenarios** → one-click test patterns (see below).
 12. **Events & pages** → `SUBSCRIBE` (event mask; bit 0 = STATE_CHANGED) and a
-    generic `GET_PAGE` for any page number (1 state, 2 modes, 8 summary, 9
-    profiles, 10 pins, 11 keymap, 13 animations) — reply logged in hex.
+    **page decoder**: pick a page (quick buttons for State/Modes/Summary/Profiles/
+    Controls/Keymap/Lights/Animations, or any number) and it walks the page's
+    record continuations, splits by the reply's stride, and renders every field
+    labeled — with enum names for actions (B1, L3…), light kinds (PLED1, Case…),
+    and animation effects. Raw hex of each reply still goes to the log. See below.
 13. **Keyboard mapping** → `SET_KEYBOARD_MAPPING` (profile, first record, then a
     list of HID usage codes). Count is derived from the code list (1–57). Requires
     "Allow hosts to change the keyboard mapping" in firmware + an active profile.
@@ -138,6 +141,34 @@ through Connect → Claim → Fill/Stage/Commit and watches the board, then uses
 **Copy**/**Save .txt** to attach the session log (with device fingerprint) to the
 PR discussion. The hex log makes it easy to pin down exactly which frame behaved
 differently between builds.
+
+## Page decoder
+
+`GET_PAGE` replies carry packed binary records, and the serialization of those
+pages is one of the easiest things for a firmware PR to get wrong — so the decoder
+parses them instead of just dumping hex. It reads the reply header
+(`[6..7]` total records, `[8]` records in this reply, `[9]` record stride,
+`[10..11]` field-group mask, `[60..63]` state token), walks continuations by
+re-requesting with an advancing `start` until it has all records, splits each
+reply's record area (from byte 12) by the stride, and labels the fields:
+
+| Page | Decoded fields |
+|---|---|
+| 1 State | frame/brightness/idle flags, input mode, profile, player, animation, brightness step, takeover #, saved step, dpad, holder token/name, claim flags/gen, takeover mode, keepalive, brightness-applied |
+| 2 Input modes | mode, flags (lighting/detected/accepted), name, lighting iface, category, caps, USB host, auth, device type |
+| 3 Enum names | enum kind, value, name |
+| 8 Summary | extent, limit, render rate, color format, flags, brightness/speed steps, layouts, grid, profile/control/light/animation counts |
+| 9 Profiles | number, enabled flag, label |
+| 10 Controls | key (GPIO/Hall/PCF), action (GpioAction), flags, instance(s), first LED, grid rect, first light, light count |
+| 11 Keyboard map | action (GpioAction), HID code |
+| 12 Lights | first LED, count, kind (LightType), flags, owner pin/action/instance, grid cell, palette |
+| 13 Animations | enabled, idle/pressed/case effects (named), idle/pressed/case speeds |
+
+Enum values are shown as `n (Name)` — e.g. action `5 (B1)`, kind `1 (Case)`,
+effect `3 (Chase index)` — and sentinels are spelled out (`0xFFFF` → `off`/`unlit`,
+`0xFF`/`0x8000` → `none`). Field offsets for pages 1/2/8 are confirmed against the
+spec and vectors; the multi-group pages (10/12/13) follow the spec's field tables,
+so if a field looks off on real hardware, cross-check the raw hex in the log.
 
 ## Protocol notes (as implemented)
 

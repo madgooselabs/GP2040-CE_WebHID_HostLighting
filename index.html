@@ -102,6 +102,15 @@
   }
   #logPanel #log { flex: 1 1 auto; height: auto; min-height: 160px; }
   @media (max-width: 960px) { #logPanel { position: static; max-height: none; } #logPanel #log { height: 300px; } }
+  button.pagebtn { padding: 5px 10px; font-size: 12px; }
+  .pageout { margin-top: 10px; }
+  .pageout:empty { display: none; }
+  .po-head { font-family: var(--mono); font-size: 12px; color: var(--accent); margin-bottom: 8px; }
+  .po-scroll { overflow-x: auto; }
+  table.po { border-collapse: collapse; font-family: var(--mono); font-size: 11.5px; width: 100%; }
+  table.po th, table.po td { border: 1px solid var(--border); padding: 3px 7px; text-align: left; white-space: nowrap; }
+  table.po thead th, table.po tbody th { color: var(--muted); font-weight: 500; background: var(--panel2); }
+  table.po td { color: var(--fg); }
 </style>
 </head>
 <body>
@@ -308,9 +317,20 @@
       </div>
       <div class="row">
         <label>Page # <input type="number" id="pageNum" value="1" min="0" max="31"></label>
-        <button id="btnReadPage" disabled>GET_PAGE</button>
-        <span class="hint" style="margin:0">1 state · 2 modes · 8 summary · 9 profiles · 10 pins · 11 keymap · 13 animations</span>
+        <button id="btnReadPage" disabled>Decode page</button>
       </div>
+      <div class="row">
+        <button class="pagebtn" data-page="1" disabled>State</button>
+        <button class="pagebtn" data-page="2" disabled>Modes</button>
+        <button class="pagebtn" data-page="8" disabled>Summary</button>
+        <button class="pagebtn" data-page="9" disabled>Profiles</button>
+        <button class="pagebtn" data-page="10" disabled>Controls</button>
+        <button class="pagebtn" data-page="11" disabled>Keymap</button>
+        <button class="pagebtn" data-page="12" disabled>Lights</button>
+        <button class="pagebtn" data-page="13" disabled>Animations</button>
+      </div>
+      <div class="hint">Decodes the full page (walking continuations) and labels each field. Raw hex of every reply still goes to the log.</div>
+      <div id="pageOut" class="pageout"></div>
     </section>
 
     <section class="panel" style="margin-top:16px">
@@ -398,7 +418,7 @@ const els = {};
  "rawCmd","rawFlags","rawPayload","rawNoReply",
  "animIndex","btnSetAnim","btnAnimOff","speedIndex","speedIdle","speedPressed","speedCase","btnSetSpeed",
  "brightStep","brightSave","btnSetBright","profileNum","btnSetProfile",
- "subMask","btnSubscribe","pageNum","btnReadPage",
+ "subMask","btnSubscribe","pageNum","btnReadPage","pageOut",
  "kbProfile","kbFirst","kbCodes","btnSetKeymap",
  "rebootTarget","btnReboot","inputMode","btnSetInputMode",
  "tgtAddr","tgtAddress","tgtCount","btnStageTarget","precAction","precLight","btnPrecedence",
@@ -628,6 +648,7 @@ function setConnected(on) {
    "btnSubscribe","btnReadPage","btnSetKeymap","btnReboot","btnSetInputMode",
    "btnStageTarget","btnPrecedence"].forEach(k => els[k].disabled = !on);
   document.querySelectorAll("button.demo").forEach(b => b.disabled = !on);
+  document.querySelectorAll("button.pagebtn").forEach(b => b.disabled = !on);
   if (!on) { setClaimed(false); stopDemo(); }
 }
 function setClaimed(on) {
@@ -880,13 +901,143 @@ async function subscribe() {
     logInfo(`subscribe mask=0x${mask.toString(16)} → enabled 0x${((r.bytes[4]<<8)|r.bytes[3]).toString(16)} status ${STATUS[r.status]??r.status}`);
   } catch (e) { logErr(e.message); }
 }
-async function readPage() {
+// ---- Page decoder ----------------------------------------------------------
+const PAGE_NAMES = {0:"Identity",1:"State",2:"Input modes",3:"Enum names",4:"Boot holds",
+  8:"Summary",9:"Profiles",10:"Controls",11:"Keyboard map",12:"Lights",13:"Animations"};
+const GPIO_ACTION = {1:"Up",2:"Down",3:"Left",4:"Right",5:"B1",6:"B2",7:"B3",8:"B4",9:"L1",10:"R1",
+  11:"L2",12:"R2",13:"S1",14:"S2",15:"A1",16:"A2",17:"L3",18:"R3",32:"Turbo",41:"A3",42:"A4",
+  43:"E1",44:"E2",45:"E3",46:"E4",47:"E5",48:"E6",49:"E7",50:"E8",51:"E9",52:"E10",53:"E11",54:"E12"};
+const LIGHT_TYPE = {0:"Button",1:"Case",2:"Turbo",3:"PLED1",4:"PLED2",5:"PLED3",6:"PLED4"};
+const IDLE_EFFECT = {0:"Static",1:"Rainbow synced",2:"Rainbow rotating",3:"Chase index",4:"Chase seq",
+  5:"Chase circle CW",6:"Chase circle CCW",7:"Chase L→R",8:"Chase R→L",9:"Chase T→B",10:"Chase B→T",
+  11:"BackForth index",12:"BackForth seq",13:"BackForth circle",14:"BackForth horiz",15:"BackForth vert",
+  16:"Chase random",17:"Jiggle 1",18:"Jiggle 2",19:"Rain"};
+const PRESSED_EFFECT = {0:"Static",1:"Random",2:"Jiggle 1",3:"Jiggle 2",4:"Burst",5:"Small burst"};
+const ENUM_KINDS = {0:"GpioAction",1:"LightType",2:"InputModeAuthType",3:"InputModeDeviceType",
+  4:"DpadMode",5:"ButtonLayout",6:"ButtonLayoutRight",7:"ButtonLayoutOrientation",8:"AnimNonPressed",9:"AnimPressed"};
+
+function enumFmt(v, map) { return map[v] != null ? `${v} (${map[v]})` : `${v}`; }
+function flagsFmt(v, names) {
+  const on = names.filter((n,i) => v & (1<<i));
+  return `0x${v.toString(16).padStart(2,"0")}${on.length ? " ("+on.join(", ")+")" : ""}`;
+}
+function animFmt(v) { return v === 0xFFFF ? "off (0xFFFF)" : v; }
+function byteOrNone(v) { return v === 0xFF ? "none" : v; }
+function ledOrNone(v) { return v === 0xFFFF ? "unlit" : v; }
+function actionOrNone(v) { return v === -32768 ? "none" : enumFmt(v, GPIO_ACTION); }
+function keyFmt(k) {
+  if (k <= 47) return `GPIO ${k}`;
+  if (k >= 0x80 && k <= 0x9F) return `Hall ${k-0x80}`;
+  if (k >= 0xC0 && k <= 0xCF) return `PCF ${k-0xC0}`;
+  return `0x${k.toString(16)}`;
+}
+function recStr(dv, off, len) {
+  let s = "";
+  for (let i = 0; i < len && off+i < dv.byteLength; i++) { const b = dv.getUint8(off+i); if (b === 0) break; s += String.fromCharCode(b); }
+  return s;
+}
+function rawRecord(dv) {
+  const parts = []; for (let i = 0; i < dv.byteLength; i++) parts.push(dv.getUint8(i).toString(16).padStart(2,"0"));
+  return { bytes: parts.join(" ") };
+}
+
+const PAGE_DECODERS = {
+  1: dv => ({
+    flags: flagsFmt(dv.getUint8(0), ["host frame shown","brightness unsaved","animations idle"]),
+    "input mode": dv.getUint8(1), profile: dv.getUint8(2), player: dv.getUint8(3),
+    animation: animFmt(dv.getUint16(4,true)), "brightness step": dv.getUint8(6),
+    "takeover #": dv.getUint8(7), "saved step": dv.getUint8(8), "dpad mode": dv.getUint8(9),
+    "holder token": "0x"+dv.getUint32(10,true).toString(16).padStart(8,"0"),
+    "holder name": recStr(dv,14,16) || "—",
+    "claim flags": flagsFmt(dv.getUint8(30), ["exclusive"]), "claim gen": dv.getUint8(31),
+    "takeover mode": enumFmt(dv.getUint8(32), {0:"whole-frame",1:"overlay"}),
+    "keepalive ms": dv.getUint16(33,true), "brightness applied": dv.getUint8(35),
+  }),
+  2: dv => ({
+    "input mode": dv.getUint8(0), flags: flagsFmt(dv.getUint8(1), ["lighting","detected","accepted"]),
+    name: recStr(dv,2,22), "lighting iface": enumFmt(dv.getUint8(24), {0:"never",1:"always",2:"by setting"}),
+    category: enumFmt(dv.getUint8(25), {0:"primary",1:"console mini"}),
+    caps: flagsFmt(dv.getUint8(26), ["player","keyboard codes"]),
+    "usb host": enumFmt(dv.getUint8(27), {0:"not used",1:"optional",2:"required"}),
+    "auth methods": "0x"+dv.getUint8(28).toString(16), "auth selected": byteOrNone(dv.getUint8(29)),
+    "device types": "0x"+dv.getUint16(30,true).toString(16), "device selected": byteOrNone(dv.getUint8(32)),
+  }),
+  3: dv => ({ enum: enumFmt(dv.getUint8(0), ENUM_KINDS), value: dv.getInt16(1,true), name: recStr(dv,3,40) }),
+  8: dv => ({
+    "LED extent": dv.getUint16(0,true), "LED limit": dv.getUint16(2,true), "render rate": dv.getUint16(4,true)+" Hz",
+    "color format": enumFmt(dv.getUint8(6), COLOR_FMT), flags: flagsFmt(dv.getUint8(7), ["white channel","USB host"]),
+    "brightness max": dv.getUint8(8), "brightness steps": dv.getUint8(9), "speed steps": dv.getUint8(10),
+    "btn layout L/R/orient": `${dv.getUint8(11)} / ${dv.getUint8(12)} / ${dv.getUint8(13)}`,
+    grid: `${dv.getUint16(14,true)} × ${dv.getUint16(16,true)}`, profiles: dv.getUint16(18,true),
+    controls: dv.getUint16(20,true), "lit / unlit": `${dv.getUint16(22,true)} / ${dv.getUint16(24,true)}`,
+    lights: dv.getUint16(26,true), animations: dv.getUint16(28,true),
+  }),
+  9: dv => ({ "profile #": dv.getUint8(0), flags: flagsFmt(dv.getUint8(1), ["enabled"]), label: recStr(dv,2,16) }),
+  10: dv => ({
+    key: keyFmt(dv.getUint8(0)), action: enumFmt(dv.getInt16(1,true), GPIO_ACTION),
+    flags: flagsFmt(dv.getUint8(3), ["duplicated","lit"]), instance: dv.getUint16(4,true), instances: dv.getUint16(6,true),
+    "first LED": ledOrNone(dv.getUint16(8,true)),
+    "grid rect": `${dv.getUint8(10)},${dv.getUint8(11)}–${dv.getUint8(12)},${dv.getUint8(13)}`,
+    "first light": ledOrNone(dv.getUint16(14,true)), "light count": dv.getUint16(16,true),
+  }),
+  11: dv => ({ action: enumFmt(dv.getInt16(0,true), GPIO_ACTION), code: "0x"+dv.getUint8(2).toString(16).padStart(2,"0") }),
+  12: dv => ({
+    "first LED": dv.getUint16(0,true), "LED count": dv.getUint16(2,true), kind: enumFmt(dv.getUint8(4), LIGHT_TYPE),
+    flags: flagsFmt(dv.getUint8(5), ["duplicated"]), "owner pin": byteOrNone(dv.getUint8(6)),
+    "owner action": actionOrNone(dv.getInt16(7,true)), "owner instance": dv.getUint16(9,true),
+    grid: `${dv.getUint8(13)},${dv.getUint8(14)}`, palette: byteOrNone(dv.getUint8(15)),
+  }),
+  13: dv => ({
+    flags: flagsFmt(dv.getUint8(0), ["enabled"]), "idle effect": enumFmt(dv.getUint8(1), IDLE_EFFECT),
+    "pressed effect": enumFmt(dv.getUint8(2), PRESSED_EFFECT), "case effect": enumFmt(dv.getUint8(3), IDLE_EFFECT),
+    "idle/pressed/case speed": `${dv.getUint8(4)} / ${dv.getUint8(5)} / ${dv.getUint8(6)}`,
+  }),
+};
+
+function esc(s) { return String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+function renderDecoded(page, meta, records) {
+  const name = PAGE_NAMES[page] || ("page " + page);
+  let html = `<div class="po-head">${name} — ${records.length} record${records.length!==1?"s":""} of ${meta.total} · stride ${meta.stride} · groups 0x${meta.groups.toString(16)} · token 0x${meta.token.toString(16).padStart(8,"0")}</div>`;
+  if (!records.length) { els.pageOut.innerHTML = html + `<div class="hint">no records returned</div>`; return; }
+  const keys = Object.keys(records[0]);
+  if (records.length === 1) {
+    html += `<table class="po"><tbody>` + keys.map(k => `<tr><th>${esc(k)}</th><td>${esc(records[0][k])}</td></tr>`).join("") + `</tbody></table>`;
+  } else {
+    html += `<div class="po-scroll"><table class="po"><thead><tr><th>#</th>` + keys.map(k => `<th>${esc(k)}</th>`).join("") +
+      `</tr></thead><tbody>` + records.map((rec,i) => `<tr><td>${i}</td>` + keys.map(k => `<td>${esc(rec[k])}</td>`).join("") + `</tr>`).join("") +
+      `</tbody></table></div>`;
+  }
+  els.pageOut.innerHTML = html;
+}
+
+async function decodePage(page) {
   try {
-    const page = parseInt(els.pageNum.value,10) & 0xff;
-    const payload = new Uint8Array(9); payload[0] = page; // [3] page, rest zero
-    const r = await send(CMD.GET_PAGE, { payload });
-    logInfo(`get_page ${page} status ${STATUS[r.status]??r.status} │ records ${hex(r.bytes.slice(3,12))} …`);
-    if (page === PAGE_SUMMARY && r.status === 0) getSummary(); // refresh parsed view
+    const dec = PAGE_DECODERS[page];
+    const records = [];
+    let start = 0, total = 0, stride = 0, token = 0, groups = 0, guard = 0;
+    do {
+      const payload = new Uint8Array(9);
+      payload[0] = page; payload[1] = start & 0xff; payload[2] = (start>>8)&0xff; // token 0 = no check, mask 0 = all
+      const r = await send(CMD.GET_PAGE, { payload });
+      if (r.status !== 0) {
+        logErr(`GET_PAGE ${page} status ${STATUS[r.status]??r.status}` + (r.status===3 ? " (state changed mid-read — retry)" : ""));
+        els.pageOut.innerHTML = `<div class="hint">GET_PAGE ${page} → status ${STATUS[r.status]??r.status}</div>`;
+        return;
+      }
+      const b = r.bytes, dvAll = new DataView(b.buffer, b.byteOffset, b.byteLength);
+      total = dvAll.getUint16(6,true);
+      const count = b[8]; stride = b[9]; groups = dvAll.getUint16(10,true); token = dvAll.getUint32(60,true);
+      for (let i = 0; i < count; i++) {
+        const base = 12 + i*stride;
+        const dv = new DataView(b.buffer, b.byteOffset + base, Math.max(0, Math.min(stride, b.byteLength - base)));
+        records.push(dec ? dec(dv) : rawRecord(dv));
+      }
+      if (count === 0) break;
+      start += count;
+    } while (start < total && ++guard < 64);
+    renderDecoded(page, { total, stride, token, groups }, records);
+    logInfo(`get_page ${page}: decoded ${records.length}/${total} records (stride ${stride})`);
+    if (page === PAGE_SUMMARY) getSummary(); // also refresh the device-info panel
   } catch (e) { logErr(e.message); }
 }
 async function setKeymap() {
@@ -1039,7 +1190,8 @@ els.btnStageGrid.onclick = () => stageGrid();
 els.btnDemoStop.onclick = stopDemo;
 document.querySelectorAll("button.demo").forEach(b => b.onclick = () => runDemo(b.dataset.demo));
 els.btnSubscribe.onclick = subscribe;
-els.btnReadPage.onclick = readPage;
+els.btnReadPage.onclick = () => decodePage(parseInt(els.pageNum.value,10) & 0xff);
+document.querySelectorAll("button.pagebtn").forEach(b => b.onclick = () => decodePage(parseInt(b.dataset.page,10)));
 els.btnSetKeymap.onclick = setKeymap;
 els.btnReboot.onclick = reboot;
 els.btnSetInputMode.onclick = setInputMode;
