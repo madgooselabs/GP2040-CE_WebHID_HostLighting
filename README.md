@@ -34,6 +34,16 @@ Then browse to `http://localhost:8000/` and click **Connect device**. In the
 chooser, pick the GP2040-CE Host Lighting interface (filtered by HID usage page
 `0xFF47` / usage `0x0002`).
 
+## Layout
+
+Connection, Device info, and Claim sit in the left column; the Log is pinned
+below them (sticky) so it stays in view in both tabs and while you scroll the
+longer Advanced panels. The lighting panels are split into two tabs:
+
+- **Basic** — Lighting (fill/clear/stage/commit) and Demo scenarios.
+- **Advanced** — Targeted stage (addressing modes), Animation & brightness,
+  Events & pages, Keyboard mapping, Raw command, and Reboot / input mode.
+
 ## What it does
 
 1. **Connect** → `requestDevice` filtered on usage page `0xFF47`, then auto-sends
@@ -91,9 +101,35 @@ Claim first, then click a demo. **Static/pattern** demos stage once and commit;
 | Breathe ▶ | Whole chain fading up and down |
 | Hue cycle ▶ | Whole chain sweeping through hues together |
 | Theater ▶ | Every third LED lit, marching (theater-chase) |
+| Walk ord ▶ | Lights each light **by ordinal**, one at a time, white (hlp-spice2x phase 2) |
 
 These are host-side patterns staged over the normal `STAGE`/`COMMIT` path, so they
 exercise the same code the PR touches — a good quick smoke test of a build.
+
+## Addressing modes (Targeted stage)
+
+The grid and most demos stage by raw **LED run** (addressing 0). A real host like
+[hlp-spice2x](https://github.com/djGLiTCH/hlp-spice2x) also stages by other
+addressing modes, which the PR's STAGE handler must resolve. The **Targeted stage**
+panel exercises them:
+
+| Addressing | Address field means | hlp-spice2x maps from |
+|---|---|---|
+| 1 light run | first light ordinal (+count) | — |
+| 4 light | one light ordinal | a profile entry's `index` |
+| 5 pin | a page-10 pin key | — |
+| 6 action | a `GpioAction` (signed i16) | a control/`button` name (B1, UP, S2…) |
+| 7 kind | a `LightType` (PLED1-4, CASE, TURBO…) | a `button` kind name |
+
+Entry modes (4/5/6/7) use the entry format `[3]` addr|fmt, `[4]` count, then
+`[address][RGB]` per entry — **action is a signed 16-bit value**. Get real action /
+kind / ordinal numbers from a page read or the bridge's `--list-lights`.
+
+**Precedence (phase 7):** reproduces the hlp-spice2x `hardware_lights` precedence
+check on a control that has two lights — control red → that one light cyan (the
+per-light entry overrides the control) → that light black (overrides even to off)
+→ cleared (both red again). Fill in the control's `GpioAction` and one of its light
+ordinals, then run it.
 
 ## Testing a PR with it
 
