@@ -99,6 +99,21 @@
   #confOut { font-family: var(--mono); font-size: 11.5px; white-space: pre-wrap; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-top: 10px; max-height: 320px; overflow: auto; }
   #confOut:empty { display: none; }
   .conf-pass { color: var(--rx); } .conf-fail { color: #ff7b72; } .conf-skip { color: var(--muted); } .conf-info { color: var(--accent); }
+  /* Intro overlay */
+  #introModal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
+  #introModal.show { display: flex; }
+  .introcard { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; max-width: 560px; width: 100%; padding: 24px 26px; box-shadow: 0 16px 48px rgba(0,0,0,.5); }
+  .introcard h2 { margin: 0 0 4px; font-size: 18px; color: var(--fg); text-transform: none; letter-spacing: 0; }
+  .introcard .eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); margin-bottom: 10px; }
+  .introcard .introbody { font-size: 13.5px; color: var(--fg); min-height: 150px; }
+  .introcard .introbody p { margin: 0 0 10px; }
+  .introcard .introbody ul { margin: 6px 0 10px; padding-left: 18px; color: var(--muted); }
+  .introcard .introbody li { margin: 3px 0; }
+  .introcard .introbody b { color: var(--fg); }
+  .introfoot { display: flex; align-items: center; gap: 10px; margin-top: 18px; }
+  .introdots { display: flex; gap: 6px; margin-right: auto; }
+  .introdots span { width: 8px; height: 8px; border-radius: 999px; background: var(--border); }
+  .introdots span.on { background: var(--accent); }
   .hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
   .hint code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-family: var(--mono); }
   .divider { height: 1px; background: var(--border); margin: 14px 0; }
@@ -110,6 +125,10 @@
   .tab { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 9px 22px; font-weight: 600; color: var(--muted); }
   .tab:hover { border-color: var(--accent); }
   .tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; padding: 5px 12px; font-size: 12px; background: var(--panel2); color: var(--muted); }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button.active { background: var(--accent); color: #fff; }
   .tabpane { display: flex; flex-direction: column; gap: 16px; }
   .tabpane[hidden] { display: none; }
   .tabpane > .panel { margin-top: 0 !important; }
@@ -139,6 +158,7 @@
   <span class="sub">WebHID · HLP 2.0 · usage page 0xFF47</span>
   <span id="status" class="pill bad">Disconnected</span>
   <span id="unsupported" class="pill bad" style="display:none">WebHID not available</span>
+  <button id="btnIntro" style="margin-left:auto;padding:5px 12px;font-size:12px">ⓘ Intro</button>
 </header>
 
 <main>
@@ -304,13 +324,28 @@
 
     <section class="panel">
       <h2>Guided tour <span class="hint" style="margin:0;text-transform:none;letter-spacing:0;float:right">learn the lifecycle</span></h2>
+      <div class="row" style="margin-bottom:12px">
+        <span class="hint" style="margin:0">Explanations:</span>
+        <span class="seg"><button id="tourPlain" class="active">Plain English</button><button id="tourTech">Technical</button></span>
+      </div>
       <div id="tourSteps"></div>
       <div class="row" style="margin-top:12px">
         <button id="btnTourRun" class="primary" disabled>Run this step ▶</button>
         <button id="btnTourSkip" disabled>Skip</button>
         <button id="btnTourReset">Restart</button>
       </div>
-      <div class="hint">Walks the full host-lighting handshake one command at a time, with a note on what each does and why. Connect first; each step runs the real command and shows the result in the log (turn on <b>Explain</b> there for a plain-English breakdown).</div>
+      <div class="hint">Walks the host-lighting conversation one step at a time. Connect first; each step runs the real command and shows the result in the log (turn on <b>Explain</b> there for a line-by-line breakdown). Switch between <b>Plain English</b> and <b>Technical</b> above to match who's reading.</div>
+      <details style="margin-top:10px">
+        <summary style="cursor:pointer;font-size:12px;color:var(--accent)">Key terms (plain English)</summary>
+        <div class="kv" style="margin-top:8px">
+          <div>Host lighting</div><div>Your PC driving the controller's LEDs live, instead of its built-in effects.</div>
+          <div>Claim</div><div>Asking the controller "may I control the lights?" Only one program at a time may hold it.</div>
+          <div>Lease</div><div>That permission expires unless it's renewed — so if your program crashes, the lights safely return to normal.</div>
+          <div>Stage</div><div>Prepare the next frame of colors off-screen, before showing it.</div>
+          <div>Commit</div><div>Show the staged frame all at once (prevents flicker / half-drawn frames).</div>
+          <div>Generation</div><div>A ticket number proving your claim is the current one; it changes if someone else takes over.</div>
+        </div>
+      </details>
     </section>
 
     <section class="panel" style="margin-top:16px">
@@ -465,6 +500,20 @@
   </div>
 </main>
 
+<div id="introModal">
+  <div class="introcard">
+    <div class="eyebrow" id="introEyebrow">Welcome</div>
+    <h2 id="introTitle">—</h2>
+    <div class="introbody" id="introBody"></div>
+    <div class="introfoot">
+      <div class="introdots" id="introDots"></div>
+      <button id="introBack">Back</button>
+      <button id="introNext" class="primary">Next</button>
+      <button id="introSkip">Skip</button>
+    </div>
+  </div>
+</div>
+
 <script>
 "use strict";
 
@@ -522,6 +571,8 @@ const els = {};
  "sMode","sProfile","sPlayer","sAnim","sBright","sTakeover","sHolder","sFlags","stateFresh",
  "btnLetLapse","kaObserver","btnClaimShared","btnTakeover","btnStaleCommit","btnUnstage","btnBench","btnBenchAll","benchOut",
  "verboseLog","claimVizRow","claimVizInfo","tourSteps","btnTourRun","btnTourSkip","btnTourReset","btnConfRun","btnConfCopy","confStatus","confOut",
+ "btnIntro","introModal","introEyebrow","introTitle","introBody","introDots","introBack","introNext","introSkip",
+ "tourPlain","tourTech",
  "rawCmd","rawFlags","rawPayload","rawNoReply",
  "animIndex","btnSetAnim","btnAnimOff","speedIndex","speedIdle","speedPressed","speedCase","btnSetSpeed",
  "brightStep","brightSave","btnSetBright","profileNum","btnSetProfile",
@@ -1189,26 +1240,49 @@ async function benchmarkAll() {
 
 // ---- Guided lifecycle tour ----
 const TOUR = [
-  { name:"HELLO", why:"Handshake. The board replies with magic ‘GPHL’, protocol version and board id — confirming the lighting interface is alive.", run: hello },
-  { name:"GET_PAGE 8 (summary)", why:"Read the summary page: LED count, max brightness, refresh rate, the chain’s native pixel format and grid size.", run: getSummary },
-  { name:"SUBSCRIBE", why:"Ask the board to push STATE_CHANGED events, so the Live state panel updates when holder, profile or brightness change.", run: subscribe },
-  { name:"CLAIM (exclusive)", why:"Take the lighting lease. The board grants a generation you must stamp in bits 4–6 of every holder command’s flags.", run: claim },
-  { name:"CONFIGURE", why:"Set takeover mode, the lease timeout and brightness policy. Must come after the claim, never before.", run: configure },
-  { name:"FILL + COMMIT", why:"Stage a solid color, then COMMIT to show it. STAGE only buffers pixels; nothing lights until COMMIT.", run: async () => { await fill(); await commit(); } },
-  { name:"Renew the lease", why:"A claim is a lease — only a repeated CLAIM renews it (HELLO/keepalive does not). Auto-renew does this every ⅓ lease; here is one by hand.", run: renewClaim },
-  { name:"RELEASE", why:"Give up the claim so the board resumes its onboard animations.", run: release },
+  { cmd:"HELLO", friendly:"Say hello to the controller",
+    plain:"A quick “are you there?”. The controller answers with its name and version — proof that a program on your PC can talk to its lights.",
+    tech:"Handshake. The board replies with magic ‘GPHL’, protocol version and board id — confirming the lighting interface is alive.", run: hello },
+  { cmd:"GET_PAGE 8", friendly:"Ask the controller about itself",
+    plain:"Read the basics: how many LEDs it has, how bright it goes, and how they’re arranged. The Device info panel fills in.",
+    tech:"Read the summary page: LED count, max brightness, refresh rate, the chain’s native pixel format and grid size.", run: getSummary },
+  { cmd:"SUBSCRIBE", friendly:"Ask to be told when things change",
+    plain:"Tell the controller to notify us whenever its lighting state changes, so the Live state panel stays up to date on its own.",
+    tech:"Ask the board to push STATE_CHANGED events, so the Live state panel updates when holder, profile or brightness change.", run: subscribe },
+  { cmd:"CLAIM", friendly:"Ask permission to control the lights",
+    plain:"Politely ask the controller “may I drive the lights?”. Only one program can hold this at a time — if it says yes, the LEDs are now ours to control.",
+    tech:"Take the lighting lease (exclusive). The board grants a generation you must stamp in bits 4–6 of every holder command’s flags.", run: claim },
+  { cmd:"CONFIGURE", friendly:"Set the ground rules",
+    plain:"Tell the controller how we want to work: how it blends with built-in effects, how long our permission lasts before it must be renewed, and how brightness is handled.",
+    tech:"Set takeover mode, the lease timeout and brightness policy. Must come after the claim, never before.", run: configure },
+  { cmd:"FILL + COMMIT", friendly:"Actually light them up",
+    plain:"Pick a color, get the whole board ready, then show it. Nothing appears until the “show it” step — that’s what keeps the lights from flickering.",
+    tech:"Stage a solid color, then COMMIT to show it. STAGE only buffers pixels; nothing lights until COMMIT.", run: async () => { await fill(); await commit(); } },
+  { cmd:"Renew", friendly:"Keep our permission alive",
+    plain:"Our permission quietly expires unless we keep renewing it — so if our program ever crashes, the controller safely returns to its own lights. Here we renew it once by hand.",
+    tech:"A claim is a lease — only a repeated CLAIM renews it (HELLO/keepalive does not). Auto-renew does this every ⅓ lease; here is one by hand.", run: renewClaim },
+  { cmd:"RELEASE", friendly:"Hand the lights back",
+    plain:"Give control back to the controller so it resumes its own built-in light shows. Always tidy up when you’re done.",
+    tech:"Give up the claim so the board resumes its onboard animations.", run: release },
 ];
 let tourIdx = 0;
+let tourLevel = "plain"; // "plain" | "tech"
 function renderTour() {
   if (!els.tourSteps) return;
+  if (els.tourPlain) { els.tourPlain.classList.toggle("active", tourLevel==="plain"); els.tourTech.classList.toggle("active", tourLevel==="tech"); }
   els.tourSteps.innerHTML = "";
   TOUR.forEach((s, i) => {
     const div = document.createElement("div");
     div.className = "tourstep" + (i===tourIdx?" active":"") + (i<tourIdx?" done":"");
     const num = document.createElement("div"); num.className = "num"; num.textContent = i<tourIdx ? "✓" : String(i+1);
     const body = document.createElement("div"); body.className = "body";
-    const t = document.createElement("div"); t.className = "t"; t.textContent = s.name;
-    const d = document.createElement("div"); d.className = "d"; d.textContent = s.why;
+    const t = document.createElement("div"); t.className = "t";
+    if (tourLevel === "plain") {
+      t.textContent = s.friendly;
+      const tag = document.createElement("span"); tag.textContent = " " + s.cmd;
+      tag.style.cssText = "color:var(--muted);font-weight:400;font-family:var(--mono);font-size:11px"; t.appendChild(tag);
+    } else { t.textContent = s.cmd; }
+    const d = document.createElement("div"); d.className = "d"; d.textContent = tourLevel==="plain" ? s.plain : s.tech;
     body.append(t, d); div.append(num, body); els.tourSteps.appendChild(div);
   });
   const atEnd = tourIdx >= TOUR.length, connected = !!(device && device.opened);
@@ -1216,10 +1290,11 @@ function renderTour() {
   els.btnTourSkip.disabled = atEnd;
   els.btnTourRun.textContent = atEnd ? "Tour complete ✓" : `Run step ${tourIdx+1} ▶`;
 }
+function setTourLevel(level) { tourLevel = level; renderTour(); saveState(); }
 async function tourRun() {
   if (tourIdx >= TOUR.length) return;
   const step = TOUR[tourIdx];
-  logInfo(`guided tour — step ${tourIdx+1}/${TOUR.length}: ${step.name}`);
+  logInfo(`guided tour — step ${tourIdx+1}/${TOUR.length}: ${step.cmd}`);
   els.btnTourRun.disabled = true;
   try { await step.run(); } catch (e) { logErr(e.message); }
   tourIdx++; renderTour();
@@ -1352,6 +1427,56 @@ async function copyConformance() {
   }
 }
 
+// ---- Intro / onboarding overlay ("what it is / what it does"; auto-shows once, replayable) ----
+const INTRO_SEEN_KEY = "gphl-intro-seen";
+const INTRO = [
+  { eyebrow:"Start here", title:"What is host lighting?",
+    html:`<p>Your controller has LEDs that normally run <b>built-in light shows stored on the device itself</b>.</p>
+          <p><b>Host lighting</b> lets a program on your computer take those LEDs over in real time — so they can react to a game, match your desktop theme, or run custom effects. When the program stops, the controller goes back to its own built-in lights.</p>
+          <p>This ability is <b>new firmware being proposed</b> for GP2040-CE. This tool is how we check that it works correctly before shipping it.</p>` },
+  { eyebrow:"What it is", title:"GP2040-CE Host Lighting Tester",
+    html:`<p>A single-file <b>WebHID</b> tool that talks to the controller straight from this browser — no extra software to install (no spice2x, OpenRGB, etc.).</p>
+          <p>It's built so <b>anyone on the team can try the new host-lighting firmware</b>: connect the board, press buttons to make the lights do things, and (for those who want it) watch exactly what's being sent.</p>
+          <p class="hint" style="margin-top:8px">Technical note: it exercises the GP2040-CE Host Lighting Protocol 2.0 (HLP 2.0).</p>` },
+  { eyebrow:"What it does", title:"Drive and inspect the whole protocol",
+    html:`<ul>
+            <li><b>Connect & identify</b> over WebHID (usage page 0xFF47), read the summary and state pages.</li>
+            <li><b>Claim the lighting lease</b>, then FILL / STAGE / COMMIT pixels in RGB, RGBW, or RGB565.</li>
+            <li><b>Demo scenarios</b> and addressing-mode tests for quick visual checks.</li>
+            <li><b>Decode state pages</b> field-by-field, and watch live state via events.</li>
+            <li><b>Probe claim/lease behavior</b>, <b>benchmark</b> throughput, and sweep pixel formats.</li>
+          </ul>` },
+  { eyebrow:"The layout", title:"Where things are",
+    html:`<p><b>Left column</b> — connection, device info, live state, the claim/lease controls, and a sticky log that's always visible.</p>
+          <p><b>Right column</b> — a <b>Basic</b> tab (lighting + demos) and an <b>Advanced</b> tab (targeted staging, animation, performance, page decoder, and the learning/decision tools).</p>
+          <p>Turn on <b>Explain</b> in the log header to get a plain-English breakdown of every message.</p>` },
+  { eyebrow:"A first run", title:"Suggested first pass",
+    html:`<ul>
+            <li><b>1.</b> Click <b>Connect device</b> and pick the board.</li>
+            <li><b>2.</b> Open the <b>Guided tour</b> (Advanced) to walk the lifecycle one command at a time.</li>
+            <li><b>3.</b> Or jump straight to <b>Conformance report</b> (Advanced) for a one-glance pass/fail verdict you can paste into the PR.</li>
+          </ul>
+          <p>You can reopen this intro anytime with the <b>ⓘ Intro</b> button, top-right.</p>` },
+];
+let introIdx = 0;
+function renderIntro() {
+  const s = INTRO[introIdx];
+  els.introEyebrow.textContent = s.eyebrow;
+  els.introTitle.textContent = s.title;
+  els.introBody.innerHTML = s.html;
+  els.introDots.innerHTML = INTRO.map((_,i)=>`<span class="${i===introIdx?"on":""}"></span>`).join("");
+  els.introBack.disabled = introIdx === 0;
+  els.introNext.textContent = introIdx === INTRO.length-1 ? "Get started" : "Next";
+}
+function openIntro() { introIdx = 0; renderIntro(); els.introModal.classList.add("show"); }
+function closeIntro() { els.introModal.classList.remove("show"); try { localStorage.setItem(INTRO_SEEN_KEY, "1"); } catch {} }
+function introNext() { if (introIdx < INTRO.length-1) { introIdx++; renderIntro(); } else closeIntro(); }
+function introBack() { if (introIdx > 0) { introIdx--; renderIntro(); } }
+function maybeShowIntroOnFirstRun() {
+  let seen = false; try { seen = localStorage.getItem(INTRO_SEEN_KEY) === "1"; } catch {}
+  if (!seen) openIntro();
+}
+
 // ---- Settings persistence (per-viewer convenience only) ----
 const LS_KEY = "gphl-tester";
 function saveState() {
@@ -1359,6 +1484,7 @@ function saveState() {
     localStorage.setItem(LS_KEY, JSON.stringify({
       name: els.claimName.value, color: els.color.value, fmt: els.pixelFmt.value,
       tab: document.querySelector(".tab.active")?.dataset.tab, verbose: els.verboseLog.checked,
+      tourLevel,
     }));
   } catch (e) { /* storage may be blocked */ }
 }
@@ -1370,6 +1496,7 @@ function restoreState() {
     if (s.fmt != null) { els.pixelFmt.value = s.fmt; pixelFormat = parseInt(s.fmt,10) || 0; }
     if (s.tab) document.querySelector(`.tab[data-tab="${s.tab}"]`)?.click();
     if (s.verbose) { els.verboseLog.checked = true; verboseLog = true; }
+    if (s.tourLevel === "plain" || s.tourLevel === "tech") tourLevel = s.tourLevel;
   } catch (e) { /* ignore */ }
 }
 
@@ -1823,8 +1950,15 @@ els.verboseLog.onchange = () => { verboseLog = els.verboseLog.checked; saveState
 els.btnTourRun.onclick = tourRun;
 els.btnTourSkip.onclick = tourSkip;
 els.btnTourReset.onclick = tourReset;
+els.tourPlain.onclick = () => setTourLevel("plain");
+els.tourTech.onclick = () => setTourLevel("tech");
 els.btnConfRun.onclick = conformanceReport;
 els.btnConfCopy.onclick = copyConformance;
+els.btnIntro.onclick = openIntro;
+els.introNext.onclick = introNext;
+els.introBack.onclick = introBack;
+els.introSkip.onclick = closeIntro;
+els.introModal.onclick = e => { if (e.target === els.introModal) closeIntro(); }; // click backdrop to dismiss
 els.pixelFmt.onchange = () => { pixelFormat = parseInt(els.pixelFmt.value,10) || 0; saveState(); };
 els.claimName.onchange = saveState;
 els.color.onchange = saveState;
@@ -1845,6 +1979,7 @@ if (!("hid" in navigator)) {
   renderTour();        // render the guided-tour steps (buttons enable on connect)
   updateClaimViz();    // show the initial "Unclaimed" state
   logInfo("ready. Click “Connect device”.");
+  maybeShowIntroOnFirstRun(); // first visit: show the "what it is / what it does" overlay
   tryReconnect();      // auto-reconnect to a previously-granted device, no chooser
 }
 </script>

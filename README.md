@@ -36,6 +36,10 @@ chooser, pick the GP2040-CE Host Lighting interface (filtered by HID usage page
 
 ## Layout
 
+On the first visit a short **intro overlay** ("what it is / what it does", 4 steps)
+appears automatically; it's remembered in `localStorage` so it won't nag afterwards.
+Replay it anytime with the **ⓘ Intro** button in the header.
+
 Connection, Device info, and Claim sit in the left column; the Log is pinned
 below them (sticky) so it stays in view in both tabs and while you scroll the
 longer Advanced panels. The lighting panels are split into two tabs:
@@ -189,8 +193,14 @@ For a team coming up to speed on the protocol and weighing a merge:
 
 - **Guided tour** (Advanced) — a "Learn mode" that walks the full lifecycle one command
   at a time — HELLO → GET_PAGE → SUBSCRIBE → CLAIM → CONFIGURE → FILL+COMMIT → renew →
-  RELEASE — each with a one-line note on what it does and why, and a *Run this step*
-  button that fires the real command (results in the log). Step numbers tick to ✓ as you go.
+  RELEASE — each with a *Run this step* button that fires the real command (results in
+  the log). Step numbers tick to ✓ as you go. A **Plain English ↔ Technical** toggle
+  rewrites every step for the reader: Plain uses friendly titles and analogies ("Ask
+  permission to control the lights"), Technical uses the protocol terms. A collapsible
+  **Key terms** glossary defines host lighting, claim, lease, stage, commit, and
+  generation in plain English. The intro overlay also opens with a plain "what is host
+  lighting?" explanation, so a first-time user who's never heard the term is oriented
+  before touching anything.
 - **Explain log** — a toggle in the Log header that annotates every TX/RX line in plain
   English: the command's purpose, decoded flags (`gen N · holder · keepalive · commit-after
   · no-reply`), the status meaning (e.g. `CLAIMED — not the current holder`), and payload
