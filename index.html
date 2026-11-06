@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GP2040-CE Host Lighting — WebHID Tester</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --panel2: #1c232d;
+    --border: #2a323d;
+    --fg: #e6edf3;
+    --muted: #8b949e;
+    --accent: #4493f8;
+    --accent2: #2ea043;
+    --danger: #da3633;
+    --tx: #d29922;
+    --rx: #3fb950;
+    --evt: #a371f7;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    padding: 14px 20px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    background: var(--panel);
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  .pill { font-size: 12px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+  .pill.ok { color: var(--rx); border-color: #2ea04366; }
+  .pill.bad { color: var(--danger); border-color: #da363366; }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px 20px; align-items: start; }
+  @media (max-width: 960px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .panel h2 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+  .row:last-child { margin-bottom: 0; }
+  label { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+  button {
+    background: var(--panel2); color: var(--fg); border: 1px solid var(--border);
+    border-radius: 7px; padding: 7px 12px; font-size: 13px; cursor: pointer; font-weight: 500;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.good { background: var(--accent2); border-color: var(--accent2); color: #fff; }
+  button.warn { background: transparent; border-color: #da363366; color: #ff7b72; }
+  input[type=text], input[type=number], select {
+    background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 8px; font-size: 13px; font-family: var(--mono);
+  }
+  input[type=number] { width: 72px; }
+  input[type=color] { width: 44px; height: 32px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); cursor: pointer; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 13px; }
+  .kv div:nth-child(odd) { color: var(--muted); }
+  .kv .mono { font-family: var(--mono); }
+  #grid { display: grid; gap: 6px; margin-top: 10px; }
+  .led {
+    aspect-ratio: 1; border-radius: 6px; border: 1px solid var(--border);
+    background: #000; cursor: pointer; position: relative; min-height: 28px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; color: #ffffff99; font-family: var(--mono);
+  }
+  .led:hover { outline: 2px solid var(--accent); }
+  #log {
+    font-family: var(--mono); font-size: 11.5px; height: 340px; overflow-y: auto;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+    white-space: pre-wrap; word-break: break-all;
+  }
+  .log-tx { color: var(--tx); }
+  .log-rx { color: var(--rx); }
+  .log-evt { color: var(--evt); }
+  .log-err { color: #ff7b72; }
+  .log-info { color: var(--muted); }
+  .log-time { color: #586069; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .hint code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-family: var(--mono); }
+  .divider { height: 1px; background: var(--border); margin: 14px 0; }
+  .full { grid-column: 1 / -1; }
+  code.inline { font-family: var(--mono); background: var(--panel2); padding: 1px 5px; border-radius: 4px; }
+  button.demo { padding: 6px 11px; }
+  button.demo.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+</style>
+</head>
+<body>
+<header>
+  <h1>GP2040-CE Host Lighting Tester</h1>
+  <span class="sub">WebHID · HLP 2.0 · usage page 0xFF47</span>
+  <span id="status" class="pill bad">Disconnected</span>
+  <span id="unsupported" class="pill bad" style="display:none">WebHID not available</span>
+</header>
+
+<main>
+  <!-- LEFT COLUMN -->
+  <div>
+    <section class="panel">
+      <h2>Connection</h2>
+      <div class="row">
+        <button id="btnConnect" class="primary">Connect device</button>
+        <button id="btnDisconnect" disabled>Disconnect</button>
+        <button id="btnHello" disabled>HELLO</button>
+        <button id="btnSummary" disabled>GET_PAGE (summary)</button>
+      </div>
+      <div class="hint">Filters on HID usage page <code>0xFF47</code> / usage <code>0x0002</code>. Enable the Host Lighting add-on in GP2040-CE firmware first.</div>
+    </section>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>Device info</h2>
+      <div class="kv" id="info">
+        <div>Product</div><div class="mono" id="iProduct">—</div>
+        <div>Protocol</div><div class="mono" id="iProto">—</div>
+        <div>Board ID</div><div class="mono" id="iBoard">—</div>
+        <div>LED extent</div><div class="mono" id="iExtent">—</div>
+        <div>LED limit</div><div class="mono" id="iLimit">—</div>
+        <div>Render rate</div><div class="mono" id="iRate">—</div>
+        <div>Color format</div><div class="mono" id="iFormat">—</div>
+        <div>Grid</div><div class="mono" id="iGrid">—</div>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>Claim</h2>
+      <div class="row">
+        <label>Name <input type="text" id="claimName" value="webhid-tester" maxlength="16" style="width:150px"></label>
+        <label><input type="checkbox" id="claimExclusive" checked> Exclusive</label>
+      </div>
+      <div class="row">
+        <button id="btnClaim" class="good" disabled>CLAIM (take)</button>
+        <button id="btnConfigure" disabled>CONFIGURE</button>
+        <button id="btnRelease" class="warn" disabled>RELEASE</button>
+        <span class="pill" id="claimState">No claim</span>
+      </div>
+      <div class="row">
+        <label>Takeover
+          <select id="takeover"><option value="0">0 whole-frame</option><option value="1">1 overlay</option></select>
+        </label>
+        <label>Keepalive ms <input type="number" id="keepaliveMs" value="2000" min="100" max="10000"></label>
+        <label><input type="checkbox" id="autoKeepalive" checked> Auto-keepalive</label>
+      </div>
+      <div class="hint">Firmware resumes onboard animations if no keepalive arrives within the timeout (default 2 s).</div>
+    </section>
+  </div>
+
+  <!-- RIGHT COLUMN -->
+  <div>
+    <section class="panel">
+      <h2>Lighting</h2>
+      <div class="row">
+        <label>Color <input type="color" id="color" value="#ff0000"></label>
+        <button id="btnFill" disabled>FILL</button>
+        <button id="btnClear" disabled>CLEAR</button>
+        <button id="btnCommit" disabled>COMMIT</button>
+      </div>
+      <div class="row">
+        <button id="btnStageGrid" disabled>STAGE grid &amp; commit</button>
+        <label>LED count <input type="number" id="ledCount" value="0" min="1" max="200"></label>
+      </div>
+      <div id="grid"></div>
+      <div class="hint">Click a swatch to paint it with the current color, then <code>STAGE grid &amp; commit</code>. Pixels are always sent R,G,B; the board converts to its chain format.</div>
+    </section>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>Demo scenarios <button id="btnDemoStop" class="warn" style="float:right;padding:3px 10px;font-size:11px" disabled>■ Stop</button></h2>
+      <div class="row" id="demoStatic">
+        <button class="demo" data-demo="red" disabled>Red</button>
+        <button class="demo" data-demo="green" disabled>Green</button>
+        <button class="demo" data-demo="blue" disabled>Blue</button>
+        <button class="demo" data-demo="white" disabled>White</button>
+        <button class="demo" data-demo="color" disabled>Picker color</button>
+        <button class="demo" data-demo="off" disabled>Off</button>
+      </div>
+      <div class="row" id="demoPattern">
+        <button class="demo" data-demo="rainbow" disabled>Rainbow</button>
+        <button class="demo" data-demo="gradient" disabled>Gradient</button>
+        <button class="demo" data-demo="alternate" disabled>Alternate</button>
+        <button class="demo" data-demo="halves" disabled>Halves</button>
+        <button class="demo" data-demo="index" disabled>Index map</button>
+      </div>
+      <div class="row" id="demoAnim">
+        <button class="demo" data-demo="blink" disabled>Blink ▶</button>
+        <button class="demo" data-demo="chase" disabled>Chase ▶</button>
+        <button class="demo" data-demo="breathe" disabled>Breathe ▶</button>
+        <button class="demo" data-demo="huecycle" disabled>Hue cycle ▶</button>
+        <button class="demo" data-demo="theater" disabled>Theater ▶</button>
+      </div>
+      <div class="hint"><b>Claim first</b> so the board accepts staging. Static/pattern demos stage once and commit; animated ones stream until <b>Stop</b>. Rainbow, hue-cycle and index map ignore the picker; the rest use it. “Index map” tints each LED by its index so you can confirm ordering.</div>
+    </section>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>Animation &amp; brightness</h2>
+      <div class="row">
+        <label>Animation index <input type="number" id="animIndex" value="0" min="0" max="65535"></label>
+        <button id="btnSetAnim" disabled>SET_ANIMATION</button>
+        <button id="btnAnimOff" disabled>Off</button>
+      </div>
+      <div class="row">
+        <label>Speed idx <input type="number" id="speedIndex" value="0" min="0" max="65535"></label>
+        <label>idle <input type="number" id="speedIdle" placeholder="—" min="0" max="255" style="width:60px"></label>
+        <label>press <input type="number" id="speedPressed" placeholder="—" min="0" max="255" style="width:60px"></label>
+        <label>case <input type="number" id="speedCase" placeholder="—" min="0" max="255" style="width:60px"></label>
+        <button id="btnSetSpeed" disabled>SET_SPEED</button>
+      </div>
+      <div class="row">
+        <label>Brightness step <input type="number" id="brightStep" value="0" min="0" max="255"></label>
+        <label><input type="checkbox" id="brightSave"> Save</label>
+        <button id="btnSetBright" disabled>SET_BRIGHTNESS</button>
+      </div>
+      <div class="row">
+        <label>Profile # <input type="number" id="profileNum" value="1" min="0" max="255"></label>
+        <button id="btnSetProfile" disabled>SET_PROFILE</button>
+      </div>
+      <div class="hint">Blank speed field = leave unchanged (<code>0xFF</code>); brightness step <code>0xFF</code> = the saved step.
+        <code>SET_ANIMATION</code> is vector-verified; <code>SET_SPEED</code> / <code>SET_BRIGHTNESS</code> / <code>SET_PROFILE</code> layouts come from the library source with no on-wire vector — watch the reply status. Profile writes flash and may pause replies ~200 ms.</div>
+    </section>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>Raw command</h2>
+      <div class="row">
+        <label>Cmd <input type="text" id="rawCmd" value="0x02" style="width:70px"></label>
+        <label>Flags <input type="text" id="rawFlags" value="0x00" style="width:70px"></label>
+        <label><input type="checkbox" id="rawNoReply"> No reply</label>
+      </div>
+      <div class="row">
+        <label>Payload (hex) <input type="text" id="rawPayload" value="08 00 00 00 00 00 00" style="width:100%"></label>
+      </div>
+      <div class="row">
+        <button id="btnRaw" disabled>Send raw</button>
+        <span class="hint" style="margin:0">Payload goes at byte [3]. Generation/holder flags are OR'd in automatically once claimed.</span>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>Events &amp; pages</h2>
+      <div class="row">
+        <label>Event mask <input type="text" id="subMask" value="0x0001" style="width:80px"></label>
+        <button id="btnSubscribe" disabled>SUBSCRIBE</button>
+        <span class="hint" style="margin:0">bit 0 = STATE_CHANGED (the only event in 2.0)</span>
+      </div>
+      <div class="row">
+        <label>Page # <input type="number" id="pageNum" value="1" min="0" max="31"></label>
+        <button id="btnReadPage" disabled>GET_PAGE</button>
+        <span class="hint" style="margin:0">1 state · 2 modes · 8 summary · 9 profiles · 10 pins · 11 keymap · 13 animations</span>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>Keyboard mapping</h2>
+      <div class="row">
+        <label>Profile <input type="number" id="kbProfile" value="1" min="0" max="255"></label>
+        <label>First <input type="number" id="kbFirst" value="0" min="0" max="65535"></label>
+        <button id="btnSetKeymap" disabled>SET_KEYBOARD_MAPPING</button>
+      </div>
+      <div class="row">
+        <label style="width:100%">HID codes (hex) <input type="text" id="kbCodes" value="04 05 06 07" style="width:100%"></label>
+      </div>
+      <div class="hint">Count = number of codes (1–57). Codes are HID keyboard usages (page 0x07, e.g. <code>04</code>=A). Needs “Allow hosts to change the keyboard mapping” enabled in firmware and an active matching profile, else status 1/3.</div>
+    </section>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>Reboot / input mode <span class="pill bad" style="float:right">danger</span></h2>
+      <div class="row">
+        <label>Reboot into
+          <select id="rebootTarget">
+            <option value="0">0 gamepad (saved mode)</option>
+            <option value="1">1 web configurator</option>
+            <option value="2">2 UF2 bootloader</option>
+          </select>
+        </label>
+        <button id="btnReboot" class="warn" disabled>REBOOT</button>
+      </div>
+      <div class="row">
+        <label>Input mode # <input type="number" id="inputMode" value="0" min="0" max="255"></label>
+        <button id="btnSetInputMode" class="warn" disabled>SET_INPUT_MODE</button>
+      </div>
+      <div class="hint">Both reboot the board and may drop the lighting interface (recoverable only via the web configurator, a boot-button hold, or hotkeys). Each asks for confirmation. Source-only — no on-wire vector.</div>
+    </section>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>Log
+        <span style="float:right;display:inline-flex;gap:6px">
+          <button id="btnCopyLog" style="padding:3px 8px;font-size:11px">Copy</button>
+          <button id="btnSaveLog" style="padding:3px 8px;font-size:11px">Save .txt</button>
+          <button id="btnClearLog" style="padding:3px 8px;font-size:11px">Clear</button>
+        </span>
+      </h2>
+      <div id="log"></div>
+      <div class="hint">Copy or save the log (with a device-info header) to attach to the PR when reporting what you saw.</div>
+    </section>
+  </div>
+</main>
+
+<script>
+"use strict";
+
+// ---- Protocol constants (from gp2040ce_hostlighting/protocol.py) ----
+const USAGE_PAGE = 0xFF47, USAGE = 0x0002, REPORT_SIZE = 64;
+const CMD = {
+  HELLO:0x01, GET_PAGE:0x02, CLAIM:0x03, CONFIGURE:0x04, SUBSCRIBE:0x05,
+  STAGE:0x10, UNSTAGE:0x11, FILL:0x12, CLEAR:0x13, COMMIT:0x20, RELEASE:0x21,
+  SET_PROFILE:0x30, SET_ANIMATION:0x31, SET_ANIMATION_SPEED:0x32,
+  SET_BRIGHTNESS:0x33, SET_KEYBOARD_MAPPING:0x34, SET_INPUT_MODE:0x70, REBOOT:0x71,
+};
+const FLAG = { COMMIT_AFTER:0x01, NO_REPLY:0x02, KEEPALIVE:0x04, HOLDER:0x08 };
+const GEN_SHIFT = 4, GEN_MASK = 0x70;
+const REPLY = 0x80, EVENT = 0x80;
+const STATUS = {0:"OK",1:"UNSUPPORTED",2:"INVALID",3:"STALE",4:"CLAIMED"};
+const ADDR_LED_RUN = 0, PIXEL_RGB = 0;
+const COLOR_FMT = {0:"GRB",1:"RGB",2:"GRBW",3:"RGBW"};
+const PAGE_SUMMARY = 8;
+const MAGIC_INPUT_MODE = [0x4D,0x4F,0x44,0x45]; // "MODE"
+const MAGIC_REBOOT     = [0x42,0x4F,0x4F,0x54]; // "BOOT"
+const RUN_CAPACITY_RGB = Math.floor((REPORT_SIZE - 7) / 3); // 19
+
+// ---- State ----
+let device = null;
+let sequence = Math.floor(Math.random() * 255);
+let generation = 0;        // claim generation, OR'd into flags bits 4-6
+let holdingExclusive = false;
+let ledExtent = 0;
+let colorFormat = 0;
+let gridW = 0, gridH = 0;
+let pending = new Map();    // seq -> {cmd, resolve, reject, timer}
+let keepaliveTimer = null;
+let demoTimer = null, demoName = null, demoBusy = false;
+let ledColors = [];         // [{r,g,b}] per LED, host-side mirror
+let logLines = [];          // plain-text mirror of the log for export
+let deviceInfo = {};        // last-read HELLO/summary fields, for the export header
+
+// ---- DOM ----
+const $ = id => document.getElementById(id);
+const els = {};
+["btnConnect","btnDisconnect","btnHello","btnSummary","btnClaim","btnConfigure",
+ "btnRelease","btnFill","btnClear","btnCommit","btnStageGrid","btnDemoStop",
+ "btnRaw","btnClearLog","btnCopyLog","btnSaveLog","status","claimState","grid","log","color","ledCount",
+ "claimName","claimExclusive","takeover","keepaliveMs","autoKeepalive",
+ "rawCmd","rawFlags","rawPayload","rawNoReply",
+ "animIndex","btnSetAnim","btnAnimOff","speedIndex","speedIdle","speedPressed","speedCase","btnSetSpeed",
+ "brightStep","brightSave","btnSetBright","profileNum","btnSetProfile",
+ "subMask","btnSubscribe","pageNum","btnReadPage",
+ "kbProfile","kbFirst","kbCodes","btnSetKeymap",
+ "rebootTarget","btnReboot","inputMode","btnSetInputMode",
+ "iProduct","iProto","iBoard","iExtent","iLimit","iRate","iFormat","iGrid"].forEach(k => els[k] = $(k));
+
+// ---- Logging ----
+function hex(bytes, len) {
+  const arr = Array.from(bytes).slice(0, len == null ? bytes.length : len);
+  return arr.map(b => b.toString(16).padStart(2,"0")).join(" ");
+}
+function log(cls, prefix, msg) {
+  const t = new Date().toLocaleTimeString("en-GB", {hour12:false}) + "." +
+            String(new Date().getMilliseconds()).padStart(3,"0");
+  const line = document.createElement("div");
+  line.className = "log-" + cls;
+  line.innerHTML = `<span class="log-time">${t}</span> <b>${prefix}</b> ${msg}`;
+  els.log.appendChild(line);
+  els.log.scrollTop = els.log.scrollHeight;
+  while (els.log.childElementCount > 500) els.log.removeChild(els.log.firstChild);
+  // plain-text mirror (strip the HTML tags from msg) for export
+  logLines.push(`${t} ${prefix} ${msg.replace(/<[^>]+>/g,"")}`);
+  while (logLines.length > 2000) logLines.shift();
+}
+const logInfo = m => log("info","·",m);
+const logErr  = m => log("err","✗",m);
+
+function cmdName(c) {
+  const base = c & ~REPLY;
+  for (const [k,v] of Object.entries(CMD)) if (v === base) return k;
+  return "0x"+base.toString(16);
+}
+
+// ---- Report building / sending ----
+function buildReport(command, seq, flags, payload) {
+  const r = new Uint8Array(REPORT_SIZE);
+  r[0] = command; r[1] = seq; r[2] = flags;
+  if (payload && payload.length) {
+    if (payload.length > REPORT_SIZE - 3) throw new Error("payload too long");
+    r.set(payload, 3);
+  }
+  return r;
+}
+
+function nextSeq() { sequence = (sequence % 255) + 1; return sequence; }
+
+// send and optionally await the matching reply
+function send(command, { payload = null, flags = 0, noReply = false, timeout = 1500 } = {}) {
+  if (!device || !device.opened) return Promise.reject(new Error("not connected"));
+  // auto-apply generation + holder, mirroring the reference library
+  if (!(flags & GEN_MASK)) flags |= (generation << GEN_SHIFT) & GEN_MASK;
+  if (holdingExclusive) flags |= FLAG.HOLDER;
+  if (noReply) flags |= FLAG.NO_REPLY;
+
+  const seq = nextSeq();
+  const report = buildReport(command, seq, flags, payload);
+  log("tx","TX", `${cmdName(command)} seq=${seq} flags=0x${flags.toString(16).padStart(2,"0")} │ ${hex(report, 24)}${report.length>24?" …":""}`);
+
+  const p = device.sendReport(0, report);
+
+  if (flags & FLAG.NO_REPLY) return p.then(() => null);
+
+  return p.then(() => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pending.delete(seq);
+      reject(new Error(`timeout waiting for reply to ${cmdName(command)} seq=${seq}`));
+    }, timeout);
+    pending.set(seq, { cmd: command, resolve, reject, timer });
+  }));
+}
+
+// ---- Incoming reports ----
+function onInputReport(event) {
+  const view = new Uint8Array(event.data.buffer);
+  const b0 = view[0], seq = view[1], status = view[2];
+
+  if (b0 === EVENT) { // event frame: 80 <event#> ...
+    log("evt","EV", `event=${view[1]} │ ${hex(view, 20)} …`);
+    return;
+  }
+
+  const m = pending.get(seq);
+  const statusTxt = STATUS[status] ?? status;
+  log("rx","RX", `${cmdName(b0)} seq=${seq} status=${statusTxt} │ ${hex(view, 24)}${view.length>24?" …":""}`);
+
+  if (m) {
+    clearTimeout(m.timer);
+    pending.delete(seq);
+    m.resolve({ bytes: view, b0, seq, status });
+  }
+}
+
+// ---- Color helpers ----
+function parseColor(hexStr) {
+  return { r: parseInt(hexStr.slice(1,3),16), g: parseInt(hexStr.slice(3,5),16), b: parseInt(hexStr.slice(5,7),16) };
+}
+function hsvToRgb(h, s, v) {
+  const c = v*s, x = c*(1-Math.abs((h/60)%2-1)), mm = v-c;
+  let r=0,g=0,b=0;
+  if (h<60){r=c;g=x;} else if(h<120){r=x;g=c;} else if(h<180){g=c;b=x;}
+  else if(h<240){g=x;b=c;} else if(h<300){r=x;b=c;} else {r=c;b=x;}
+  return { r:Math.round((r+mm)*255), g:Math.round((g+mm)*255), b:Math.round((b+mm)*255) };
+}
+
+// ---- Grid UI ----
+function buildGrid(count, w, h) {
+  ledExtent = count;
+  ledColors = Array.from({length: count}, () => ({r:0,g:0,b:0}));
+  els.ledCount.value = count;
+  const cols = (w && w > 0) ? w : Math.min(count, Math.ceil(Math.sqrt(count)) || 1);
+  els.grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  els.grid.innerHTML = "";
+  for (let i = 0; i < count; i++) {
+    const d = document.createElement("div");
+    d.className = "led"; d.dataset.i = i; d.textContent = i;
+    d.onclick = () => {
+      ledColors[i] = parseColor(els.color.value);
+      paintGrid();
+    };
+    els.grid.appendChild(d);
+  }
+  paintGrid();
+}
+function paintGrid() {
+  [...els.grid.children].forEach((d,i) => {
+    const c = ledColors[i] || {r:0,g:0,b:0};
+    d.style.background = `rgb(${c.r},${c.g},${c.b})`;
+    const lum = 0.299*c.r + 0.587*c.g + 0.114*c.b;
+    d.style.color = lum > 110 ? "#00000099" : "#ffffff99";
+  });
+}
+
+// ---- STAGE the whole grid as LED runs, commit on the last report ----
+async function stageGrid(quiet = false) {
+  const n = ledColors.length;
+  if (!n) { logErr("no LEDs — run GET_PAGE or set LED count"); return; }
+  for (let start = 0; start < n; start += RUN_CAPACITY_RGB) {
+    const chunk = ledColors.slice(start, start + RUN_CAPACITY_RGB);
+    const last = start + RUN_CAPACITY_RGB >= n;
+    const payload = new Uint8Array(3 + chunk.length * 3);
+    payload[0] = ADDR_LED_RUN | (PIXEL_RGB << 4);
+    payload[1] = start & 0xff; payload[2] = (start >> 8) & 0xff; // first LED, LE u16
+    payload[3] = chunk.length;                                   // count
+    chunk.forEach((c,i) => { const o = 4 + i*3; payload[o]=c.r; payload[o+1]=c.g; payload[o+2]=c.b; });
+    // payload layout: [0] addr|fmt, [1..2] first LE, [3] count, [4..] pixels
+    if (last) {
+      await send(CMD.STAGE, { payload, flags: FLAG.COMMIT_AFTER });
+    } else {
+      await send(CMD.STAGE, { payload, noReply: true });
+    }
+  }
+  if (!quiet) logInfo(`staged ${n} LEDs (+commit)`);
+}
+
+// ---- Button wiring ----
+function setConnected(on) {
+  els.status.className = "pill " + (on ? "ok" : "bad");
+  els.status.textContent = on ? "Connected" : "Disconnected";
+  els.btnConnect.disabled = on;
+  ["btnDisconnect","btnHello","btnSummary","btnClaim","btnFill","btnClear","btnCommit",
+   "btnStageGrid","btnRaw","btnConfigure",
+   "btnSetAnim","btnAnimOff","btnSetSpeed","btnSetBright","btnSetProfile",
+   "btnSubscribe","btnReadPage","btnSetKeymap","btnReboot","btnSetInputMode"].forEach(k => els[k].disabled = !on);
+  document.querySelectorAll("button.demo").forEach(b => b.disabled = !on);
+  if (!on) { setClaimed(false); stopDemo(); }
+}
+function setClaimed(on) {
+  els.btnRelease.disabled = !on;
+  els.claimState.textContent = on ? `Claimed (gen ${generation}${holdingExclusive?", exclusive":""})` : "No claim";
+  els.claimState.className = "pill" + (on ? " ok" : "");
+}
+
+async function connect() {
+  try {
+    const filters = [{ usagePage: USAGE_PAGE, usage: USAGE }];
+    const devices = await navigator.hid.requestDevice({ filters });
+    if (!devices.length) { logInfo("no device selected"); return; }
+    device = devices[0];
+    if (!device.opened) await device.open();
+    device.addEventListener("inputreport", onInputReport);
+    navigator.hid.addEventListener("disconnect", e => { if (e.device === device) onDisconnect(); });
+    els.iProduct.textContent = device.productName || "(unnamed)";
+    logInfo(`opened "${device.productName}" — ${device.collections.length} collection(s)`);
+    setConnected(true);
+    generation = 0; holdingExclusive = false;
+    await hello();
+    await getSummary();
+  } catch (e) { logErr(e.message); }
+}
+
+function onDisconnect() {
+  stopKeepalive(); stopDemo();
+  if (device) { try { device.close(); } catch {} }
+  device = null;
+  setConnected(false);
+  logInfo("device disconnected");
+}
+
+async function hello() {
+  try {
+    const r = await send(CMD.HELLO);
+    const b = r.bytes;
+    const magic = String.fromCharCode(b[3],b[4],b[5],b[6]);
+    const boardId = Array.from(b.slice(9,17)).map(c => c?String.fromCharCode(c):"").join("");
+    els.iProto.textContent = `${magic} v${b[7]}.${b[8]} (queue ${b[17]})`;
+    els.iBoard.textContent = boardId.trim() || hex(b.slice(9,17));
+    deviceInfo.product = device.productName || "(unnamed)";
+    deviceInfo.protocol = `${magic} v${b[7]}.${b[8]}`;
+    deviceInfo.board = boardId.trim() || hex(b.slice(9,17));
+    deviceInfo.vid = device.vendorId; deviceInfo.pid = device.productId;
+    if (magic !== "GPHL") logErr(`unexpected magic "${magic}"`);
+  } catch (e) { logErr(e.message); }
+}
+
+async function getSummary() {
+  try {
+    // payload: [3] page, [4..5] start(LE), [6..9] token(LE u32), [10..11] mask(LE u16)
+    const payload = new Uint8Array(9);
+    payload[0] = PAGE_SUMMARY; // page 8, rest zero
+    const r = await send(CMD.GET_PAGE, { payload });
+    const b = r.bytes;
+    if (r.status !== 0) { logErr(`GET_PAGE status ${STATUS[r.status]??r.status}`); return; }
+    const dv = new DataView(b.buffer);
+    // record area begins at byte 12 (HEADER_RECORDS)
+    const extent = dv.getUint16(12, true);
+    const limit  = dv.getUint16(14, true);
+    const rate   = dv.getUint16(16, true);
+    colorFormat  = b[18];
+    const flags  = b[19];
+    gridW = dv.getUint16(26, true);
+    gridH = dv.getUint16(28, true);
+    els.iExtent.textContent = extent;
+    els.iLimit.textContent  = limit;
+    els.iRate.textContent   = rate + " Hz";
+    els.iFormat.textContent = (COLOR_FMT[colorFormat] ?? colorFormat) +
+      (flags & 1 ? " +W" : "") + (flags & 2 ? " (USB host)" : "");
+    els.iGrid.textContent   = (gridW && gridH) ? `${gridW} × ${gridH}` : "—";
+    deviceInfo.summary = `extent=${extent} limit=${limit} rate=${rate}Hz fmt=${COLOR_FMT[colorFormat]??colorFormat} flags=0x${flags.toString(16)} grid=${gridW}x${gridH}`;
+    const n = extent > 0 ? extent : (limit > 0 ? Math.min(limit, 32) : 16);
+    buildGrid(n, gridW, gridH);
+    logInfo(`summary: extent=${extent} limit=${limit} rate=${rate}Hz fmt=${COLOR_FMT[colorFormat]??colorFormat} grid=${gridW}x${gridH}`);
+  } catch (e) { logErr(e.message); }
+}
+
+async function claim() {
+  try {
+    const action = 0; // take
+    const token = (Math.floor(Math.random()*0xFFFFFFFE) + 1) >>> 0;
+    const exclusive = els.claimExclusive.checked;
+    const name = els.claimName.value.slice(0,16);
+    const payload = new Uint8Array(22); // [0] action, [1..4] token, [5..20] name(16), [21] flags
+    payload[0] = action;
+    payload[1] = token & 0xff; payload[2] = (token>>8)&0xff; payload[3] = (token>>16)&0xff; payload[4] = (token>>>24)&0xff;
+    for (let i = 0; i < name.length; i++) payload[5+i] = name.charCodeAt(i);
+    payload[21] = exclusive ? 0x01 : 0x00;
+    const r = await send(CMD.CLAIM, { payload });
+    if (r.status !== 0) { logErr(`CLAIM rejected: ${STATUS[r.status]??r.status}`); return; }
+    // reply: [28] holder flags, [29] generation
+    generation = r.bytes[29] & 0x07;
+    holdingExclusive = exclusive;
+    setClaimed(true);
+    logInfo(`claimed, generation ${generation}`);
+    if (els.autoKeepalive.checked) startKeepalive();
+  } catch (e) { logErr(e.message); }
+}
+
+async function configure() {
+  try {
+    const takeover = parseInt(els.takeover.value,10);
+    const ka = Math.max(0, Math.min(10000, parseInt(els.keepaliveMs.value,10) || 0));
+    // payload: [3] takeover, [4..5] keepalive ms(LE), [6] brightness applied
+    const payload = new Uint8Array(4);
+    payload[0] = takeover; payload[1] = ka & 0xff; payload[2] = (ka>>8)&0xff; payload[3] = 0;
+    const r = await send(CMD.CONFIGURE, { payload });
+    logInfo(`configure status ${STATUS[r.status]??r.status}`);
+  } catch (e) { logErr(e.message); }
+}
+
+async function release() {
+  try {
+    stopKeepalive(); stopDemo();
+    await send(CMD.RELEASE);
+    generation = 0; holdingExclusive = false;
+    setClaimed(false);
+    logInfo("released claim");
+  } catch (e) { logErr(e.message); }
+}
+
+async function fill() {
+  try {
+    const c = parseColor(els.color.value);
+    const payload = new Uint8Array([PIXEL_RGB << 4, c.r, c.g, c.b]); // [3] fmt<<4, [4..6] RGB
+    await send(CMD.FILL, { payload, flags: FLAG.COMMIT_AFTER });
+    ledColors = ledColors.map(() => ({...c})); paintGrid();
+    logInfo(`fill #${els.color.value.slice(1)} +commit`);
+  } catch (e) { logErr(e.message); }
+}
+
+async function clearLeds() {
+  try {
+    await send(CMD.CLEAR, { flags: FLAG.COMMIT_AFTER });
+    ledColors = ledColors.map(() => ({r:0,g:0,b:0})); paintGrid();
+    logInfo("clear +commit");
+  } catch (e) { logErr(e.message); }
+}
+
+async function commit() { try { await send(CMD.COMMIT); logInfo("commit"); } catch (e) { logErr(e.message); } }
+
+// ---- Demo scenarios (host-side test patterns) ----
+const BLACK = {r:0,g:0,b:0};
+function scale(c, f) { return { r:Math.round(c.r*f), g:Math.round(c.g*f), b:Math.round(c.b*f) }; }
+
+// static/pattern builders: given count n + picker color, return LED array
+const PATTERNS = {
+  red:       n => Array.from({length:n}, () => ({r:255,g:0,b:0})),
+  green:     n => Array.from({length:n}, () => ({r:0,g:255,b:0})),
+  blue:      n => Array.from({length:n}, () => ({r:0,g:0,b:255})),
+  white:     n => Array.from({length:n}, () => ({r:255,g:255,b:255})),
+  color:     (n,c) => Array.from({length:n}, () => ({...c})),
+  off:       n => Array.from({length:n}, () => ({...BLACK})),
+  rainbow:   n => Array.from({length:n}, (_,i) => hsvToRgb((i/n)*360, 1, 1)),
+  gradient:  (n,c) => Array.from({length:n}, (_,i) => scale(c, n<2?1:(1 - i/(n-1)))),
+  alternate: (n,c) => Array.from({length:n}, (_,i) => i%2 ? {...BLACK} : {...c}),
+  halves:    (n,c) => Array.from({length:n}, (_,i) => i < n/2 ? {...c} : scale(c,0.15)),
+  index:     n => Array.from({length:n}, (_,i) => hsvToRgb((i*47)%360, 1, 1)),
+};
+// animated steppers: (phase, n, color) -> LED array
+const ANIMS = {
+  blink:    (p,n,c) => Array.from({length:n}, () => p%2 ? {...BLACK} : {...c}),
+  chase:    (p,n,c) => Array.from({length:n}, (_,i) => i === p%n ? {...c} : {...BLACK}),
+  breathe:  (p,n,c) => { const f = (Math.sin(p/8)*0.5+0.5); return Array.from({length:n}, () => scale(c,f)); },
+  huecycle: (p,n)   => { const col = hsvToRgb((p*12)%360,1,1); return Array.from({length:n}, () => ({...col})); },
+  theater:  (p,n,c) => Array.from({length:n}, (_,i) => (i+p)%3===0 ? {...c} : {...BLACK}),
+};
+
+function markDemo(name) {
+  document.querySelectorAll("button.demo").forEach(b =>
+    b.classList.toggle("active", !!name && b.dataset.demo === name));
+}
+function stopDemo() {
+  if (demoTimer) { clearInterval(demoTimer); demoTimer = null; }
+  demoName = null; demoBusy = false;
+  if (els.btnDemoStop) els.btnDemoStop.disabled = true;
+  markDemo(null);
+}
+async function runDemo(name) {
+  const n = ledColors.length;
+  if (!n) { logErr("no LEDs — run GET_PAGE or set LED count"); return; }
+  if (name === "off") { stopDemo(); await clearLeds(); return; }
+  const c = parseColor(els.color.value);
+
+  if (PATTERNS[name]) {           // one-shot
+    stopDemo();
+    ledColors = PATTERNS[name](n, c);
+    paintGrid();
+    await stageGrid();
+    logInfo(`demo: ${name}`);
+    return;
+  }
+  if (ANIMS[name]) {              // streaming until Stop
+    if (demoName === name) { stopDemo(); return; } // toggle off
+    stopDemo();
+    demoName = name;
+    els.btnDemoStop.disabled = false;
+    markDemo(name);
+    logInfo(`demo: ${name} ▶ (streaming)`);
+    let phase = 0;
+    const step = ANIMS[name];
+    demoTimer = setInterval(async () => {
+      if (demoBusy) return;       // skip a tick if the last stage is still in flight
+      demoBusy = true;
+      try {
+        ledColors = step(phase++, ledColors.length, parseColor(els.color.value));
+        paintGrid();
+        await stageGrid(true);    // quiet: don't spam the log each frame
+      } catch (e) { logErr(e.message); stopDemo(); }
+      finally { demoBusy = false; }
+    }, 120);
+  }
+}
+
+function startKeepalive() {
+  stopKeepalive();
+  keepaliveTimer = setInterval(() => {
+    send(CMD.HELLO, { flags: FLAG.KEEPALIVE, noReply: true }).catch(()=>{});
+  }, 750);
+  logInfo("auto-keepalive on (750 ms)");
+}
+function stopKeepalive() { if (keepaliveTimer) { clearInterval(keepaliveTimer); keepaliveTimer = null; } }
+
+// ---- Events, page reads, keyboard mapping, reboot/input-mode ----
+async function subscribe() {
+  try {
+    const mask = (parseInt(els.subMask.value, 16) || 0) & 0xFFFF;
+    const payload = new Uint8Array([mask & 0xff, (mask>>8)&0xff]); // [3..4] mask LE
+    const r = await send(CMD.SUBSCRIBE, { payload });
+    logInfo(`subscribe mask=0x${mask.toString(16)} → enabled 0x${((r.bytes[4]<<8)|r.bytes[3]).toString(16)} status ${STATUS[r.status]??r.status}`);
+  } catch (e) { logErr(e.message); }
+}
+async function readPage() {
+  try {
+    const page = parseInt(els.pageNum.value,10) & 0xff;
+    const payload = new Uint8Array(9); payload[0] = page; // [3] page, rest zero
+    const r = await send(CMD.GET_PAGE, { payload });
+    logInfo(`get_page ${page} status ${STATUS[r.status]??r.status} │ records ${hex(r.bytes.slice(3,12))} …`);
+    if (page === PAGE_SUMMARY && r.status === 0) getSummary(); // refresh parsed view
+  } catch (e) { logErr(e.message); }
+}
+async function setKeymap() {
+  try {
+    const profile = parseInt(els.kbProfile.value,10) & 0xff;
+    const first = parseInt(els.kbFirst.value,10) & 0xFFFF;
+    const codes = els.kbCodes.value.trim().split(/[\s,]+/).filter(Boolean).map(h => parseInt(h,16) & 0xff);
+    if (codes.length < 1 || codes.length > 57) { logErr("code count must be 1–57"); return; }
+    // [3] profile, [4..5] first LE, [6] count, [7..] codes
+    const payload = new Uint8Array(4 + codes.length);
+    payload[0] = profile; payload[1] = first & 0xff; payload[2] = (first>>8)&0xff; payload[3] = codes.length;
+    codes.forEach((c,i) => payload[4+i] = c);
+    const r = await send(CMD.SET_KEYBOARD_MAPPING, { payload });
+    logInfo(`set_keyboard_mapping profile=${profile} first=${first} count=${codes.length} status ${STATUS[r.status]??r.status}`);
+  } catch (e) { logErr(e.message); }
+}
+async function reboot() {
+  const target = parseInt(els.rebootTarget.value,10) & 0xff;
+  const label = els.rebootTarget.selectedOptions[0].text;
+  if (!confirm(`REBOOT the board into "${label}"?\n\nThe device will reboot and this connection will drop.`)) return;
+  try {
+    const payload = new Uint8Array([target, ...MAGIC_REBOOT]); // [3] target, [4..7] "BOOT"
+    // board replies before rebooting, but the reply may not arrive — don't fail hard
+    await send(CMD.REBOOT, { payload, noReply: true });
+    logInfo(`reboot → ${label} (sent)`);
+  } catch (e) { logErr(e.message); }
+}
+async function setInputMode() {
+  const mode = parseInt(els.inputMode.value,10) & 0xff;
+  if (!confirm(`SET_INPUT_MODE to ${mode}?\n\nThis reboots the board. A mode without the Host Lighting interface can only be left via the web configurator, a boot-button hold, or hotkeys.`)) return;
+  try {
+    const payload = new Uint8Array([mode, ...MAGIC_INPUT_MODE]); // [3] mode, [4..7] "MODE"
+    await send(CMD.SET_INPUT_MODE, { payload, noReply: true });
+    logInfo(`set_input_mode ${mode} (sent; board reboots)`);
+  } catch (e) { logErr(e.message); }
+}
+
+// ---- Animation / brightness / profile ----
+async function setAnimation(off) {
+  try {
+    const idx = off ? 0xFFFF : (parseInt(els.animIndex.value,10) & 0xFFFF);
+    const payload = new Uint8Array([idx & 0xff, (idx>>8)&0xff]); // [3..4] index LE, 0xFFFF=off
+    const r = await send(CMD.SET_ANIMATION, { payload });
+    logInfo(`set_animation ${off?"off":idx} status ${STATUS[r.status]??r.status}`);
+  } catch (e) { logErr(e.message); }
+}
+async function setAnimationSpeed() {
+  try {
+    const idx = parseInt(els.speedIndex.value,10) & 0xFFFF;
+    const sp = k => { const v = els[k].value.trim(); return v === "" ? 0xFF : (parseInt(v,10) & 0xFF); };
+    // [3..4] index LE, [5] idle, [6] pressed, [7] case; 0xFF = leave unchanged
+    const payload = new Uint8Array([idx & 0xff, (idx>>8)&0xff, sp("speedIdle"), sp("speedPressed"), sp("speedCase")]);
+    const r = await send(CMD.SET_ANIMATION_SPEED, { payload });
+    logInfo(`set_speed idx=${idx} [${payload[2]},${payload[3]},${payload[4]}] status ${STATUS[r.status]??r.status}`);
+  } catch (e) { logErr(e.message); }
+}
+async function setBrightness() {
+  try {
+    const step = parseInt(els.brightStep.value,10) & 0xFF;
+    const save = els.brightSave.checked ? 1 : 0;
+    const payload = new Uint8Array([step, save]); // [3] step (0xFF=saved), [4] save 0/1
+    const r = await send(CMD.SET_BRIGHTNESS, { payload });
+    logInfo(`set_brightness step=${step} save=${save} status ${STATUS[r.status]??r.status}`);
+  } catch (e) { logErr(e.message); }
+}
+async function setProfile() {
+  try {
+    const num = parseInt(els.profileNum.value,10) & 0xFF;
+    const payload = new Uint8Array([num]); // [3] profile number
+    const r = await send(CMD.SET_PROFILE, { payload, timeout: 3000 }); // flash write pauses replies ~200 ms
+    logInfo(`set_profile ${num} status ${STATUS[r.status]??r.status}`);
+  } catch (e) { logErr(e.message); }
+}
+
+async function sendRaw() {
+  try {
+    const cmd = parseInt(els.rawCmd.value, 16) || parseInt(els.rawCmd.value, 10);
+    const flags = parseInt(els.rawFlags.value, 16) || parseInt(els.rawFlags.value, 10) || 0;
+    const bytes = els.rawPayload.value.trim().split(/[\s,]+/).filter(Boolean)
+      .map(h => parseInt(h, 16) & 0xff);
+    const payload = new Uint8Array(bytes);
+    const r = await send(cmd, { payload, flags, noReply: els.rawNoReply.checked });
+    if (r) logInfo(`raw reply status ${STATUS[r.status]??r.status}`);
+  } catch (e) { logErr(e.message); }
+}
+
+// ---- Log export ----
+function buildLogText() {
+  const lines = [];
+  lines.push("# GP2040-CE Host Lighting Tester — session log");
+  lines.push("Generated: " + new Date().toISOString());
+  lines.push("User agent: " + navigator.userAgent);
+  lines.push("");
+  lines.push("## Device");
+  lines.push("Product:  " + (deviceInfo.product ?? "—"));
+  lines.push("VID:PID:  " + (deviceInfo.vid != null
+    ? deviceInfo.vid.toString(16).padStart(4,"0") + ":" + deviceInfo.pid.toString(16).padStart(4,"0")
+    : "—"));
+  lines.push("Protocol: " + (deviceInfo.protocol ?? "—"));
+  lines.push("Board ID: " + (deviceInfo.board ?? "—"));
+  lines.push("Summary:  " + (deviceInfo.summary ?? "—"));
+  lines.push("");
+  lines.push("## Log (" + logLines.length + " lines)");
+  lines.push(...logLines);
+  lines.push("");
+  return lines.join("\n");
+}
+async function copyLog() {
+  const text = buildLogText();
+  try {
+    await navigator.clipboard.writeText(text);
+    logInfo("log copied to clipboard");
+  } catch {
+    // clipboard API can fail on file:// — fall back to a selectable prompt
+    const ta = document.createElement("textarea");
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); logInfo("log copied to clipboard"); }
+    catch { logErr("couldn't copy — use Save .txt instead"); }
+    ta.remove();
+  }
+}
+function saveLog() {
+  const blob = new Blob([buildLogText()], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().replace(/[:.]/g,"-").slice(0,19);
+  a.href = url; a.download = `gphl-tester-${stamp}.txt`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  logInfo("log saved");
+}
+
+// ---- Events ----
+els.btnConnect.onclick = connect;
+els.btnDisconnect.onclick = onDisconnect;
+els.btnHello.onclick = hello;
+els.btnSummary.onclick = getSummary;
+els.btnClaim.onclick = claim;
+els.btnConfigure.onclick = configure;
+els.btnRelease.onclick = release;
+els.btnFill.onclick = fill;
+els.btnClear.onclick = clearLeds;
+els.btnCommit.onclick = commit;
+els.btnStageGrid.onclick = () => stageGrid();
+els.btnDemoStop.onclick = stopDemo;
+document.querySelectorAll("button.demo").forEach(b => b.onclick = () => runDemo(b.dataset.demo));
+els.btnSubscribe.onclick = subscribe;
+els.btnReadPage.onclick = readPage;
+els.btnSetKeymap.onclick = setKeymap;
+els.btnReboot.onclick = reboot;
+els.btnSetInputMode.onclick = setInputMode;
+els.btnSetAnim.onclick = () => setAnimation(false);
+els.btnAnimOff.onclick = () => setAnimation(true);
+els.btnSetSpeed.onclick = setAnimationSpeed;
+els.btnSetBright.onclick = setBrightness;
+els.btnSetProfile.onclick = setProfile;
+els.btnRaw.onclick = sendRaw;
+els.btnClearLog.onclick = () => { els.log.innerHTML = ""; logLines = []; };
+els.btnCopyLog.onclick = copyLog;
+els.btnSaveLog.onclick = saveLog;
+els.ledCount.onchange = () => { const n = parseInt(els.ledCount.value,10)||0; if (n>0) buildGrid(n, gridW, gridH); };
+
+// ---- Init ----
+if (!("hid" in navigator)) {
+  els.unsupported.style.display = "";
+  els.btnConnect.disabled = true;
+  logErr("navigator.hid not available — use Chrome/Edge over https or localhost (or a file:// page).");
+} else {
+  buildGrid(16, 4, 4); // placeholder until GET_PAGE
+  logInfo("ready. Click “Connect device”.");
+}
+</script>
+</body>
+</html>
